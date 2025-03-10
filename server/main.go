@@ -25,37 +25,55 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"google.golang.org/grpc"
 	pb "remote-build/remote-build"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
+const defaultName = "world"
+
 var (
-	port = flag.Int("port", 50051, "The server port")
+	port       = flag.Int("port", 50051, "The server port")
+	workerAddr = flag.String("worker_addr", "localhost:50052", "The worker address")
+	name       = flag.String("name", defaultName, "Name to send")
 )
 
 // server is used to implement helloworld.GreeterServer.
 type server struct {
-	pb.UnimplementedGreeterServer
+	pb.UnimplementedClientServerServer
 }
 
-//SayHello implements helloworld.GreeterServer
-func (s *server) SayHello(_ context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
+func (s *server) HelloServer(_ context.Context, in *pb.BuildRequest) (*pb.BuildResponse, error) {
 	log.Printf("Received: %v", in.GetName())
-	return &pb.HelloReply{Message: "Hello " + in.GetName()}, nil
-}
+	//server to worker
+	conn, err := grpc.Dial(*workerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Server did not connect to worker: %v", err)
+	}
+	defer conn.Close()
+	client := pb.NewServerWorkerClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	r, err := client.HelloWorker(ctx, &pb.WorkRequest{Name: *name})
+	if err != nil {
+		log.Fatalf("Server call to HelloWorker failed: %v", err)
+	}
+	log.Printf("Greeting from worker: %s", r.GetMessage())
 
-func (s *server) SayHelloAgain(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
-	return &pb.HelloReply{Message: "Hello again " + in.GetName()}, nil
+	return &pb.BuildResponse{Message: "main.o_lib.o" + in.GetName()}, nil
 }
 
 func main() {
+	//client to server
 	flag.Parse()
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
-	pb.RegisterGreeterServer(s, &server{})
+	pb.RegisterClientServerServer(s, &server{})
 	log.Printf("server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
