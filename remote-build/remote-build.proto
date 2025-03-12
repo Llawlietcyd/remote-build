@@ -25,7 +25,11 @@ service Server_worker {
 
 // The request message containing the user's name.
 message WorkRequest {
-  string name = 1;
+  string compile_command = 1;
+  string filename = 2;
+  string content = 3;
+
+
 }
 
 // The response message containing the greetings
@@ -33,18 +37,17 @@ message WorkResponce {
   string message = 1;
 }
 
-
-
-
 //Clinet to Server
 service Client_server {
   rpc HelloServer(BuildRequest) returns (BuildResponse) {}
 }
 
 message BuildRequest {
-  string name = 1;
+  string compile_command = 1;
+  string filename = 2;
+  string content = 3;
 }
 
 message BuildResponse {
-  string message = 1;
+  string filename = 1;
 }

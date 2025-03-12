@@ -24,6 +24,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 
 	pb "remote-build/remote-build"
 
@@ -39,8 +42,35 @@ type worker struct {
 }
 
 func (w *worker) HelloWorker(ctx context.Context, in *pb.WorkRequest) (*pb.WorkResponce, error) {
-	log.Printf("Worker received: %v", in.GetName())
-	return &pb.WorkResponce{Message: "main.o"}, nil
+	log.Printf("Worker received compile request for file: %v", in.GetFilename())
+	log.Printf("Compile command: %v", in.GetCompileCommand())
+
+	tempDir, err := os.MkdirTemp("", "remote-build-worker")
+	if err != nil {
+		log.Printf("Failed to create temp directory: %v", err)
+		return &pb.WorkResponce{Message: "Error: Failed to create compilation environment"}, err
+	}
+	defer os.RemoveAll(tempDir)
+
+	sourcePath := filepath.Join(tempDir, in.GetFilename())
+	err = os.WriteFile(sourcePath, []byte(in.GetContent()), 0644)
+	if err != nil {
+		log.Printf("Failed to write source file: %v", err)
+		return &pb.WorkResponce{Message: "Error: Failed to write source file"}, err
+	}
+
+	cmd := exec.Command("sh", "-c", in.GetCompileCommand())
+	cmd.Dir = tempDir
+	output, err := cmd.CombinedOutput()
+
+	log.Printf("Compilation output: %s", string(output))
+
+	if err != nil {
+		log.Printf("Compilation failed: %v", err)
+		return &pb.WorkResponce{Message: "Compilation failed: " + string(output)}, nil
+	}
+
+	return &pb.WorkResponce{Message: "Compilation successful: " + string(output)}, nil
 }
 
 func main() {

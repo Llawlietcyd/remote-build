@@ -37,7 +37,6 @@ const defaultName = "world"
 var (
 	port       = flag.Int("port", 50051, "The server port")
 	workerAddr = flag.String("worker_addr", "localhost:50052", "The worker address")
-	name       = flag.String("name", defaultName, "Name to send")
 )
 
 // server is used to implement helloworld.GreeterServer.
@@ -46,7 +45,8 @@ type server struct {
 }
 
 func (s *server) HelloServer(_ context.Context, in *pb.BuildRequest) (*pb.BuildResponse, error) {
-	log.Printf("Received: %v", in.GetName())
+	log.Printf("Received build request for file: %v", in.GetFilename())
+	log.Printf("Compile command: %v", in.GetCompileCommand())
 	//server to worker
 	conn, err := grpc.Dial(*workerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -56,13 +56,21 @@ func (s *server) HelloServer(_ context.Context, in *pb.BuildRequest) (*pb.BuildR
 	client := pb.NewServerWorkerClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	r, err := client.HelloWorker(ctx, &pb.WorkRequest{Name: *name})
-	if err != nil {
-		log.Fatalf("Server call to HelloWorker failed: %v", err)
-	}
-	log.Printf("Greeting from worker: %s", r.GetMessage())
 
-	return &pb.BuildResponse{Message: "main.o_lib.o" + in.GetName()}, nil
+	workRequest := &pb.WorkRequest{
+		CompileCommand: in.GetCompileCommand(),
+		Filename:       in.GetFilename(),
+		Content:        in.GetContent(),
+	}
+	r, err := client.HelloWorker(ctx, workRequest)
+	if err != nil {
+		log.Printf("Server call to HelloWorker failed: %v", err)
+		return &pb.BuildResponse{Filename: "error_calling_worker"}, err
+	}
+	log.Printf("Response from worker: %s", r.GetMessage())
+
+	outputFilename := in.GetFilename() + ".out"
+	return &pb.BuildResponse{Filename: outputFilename}, nil
 }
 
 func main() {
