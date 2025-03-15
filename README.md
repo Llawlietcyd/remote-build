@@ -10,6 +10,7 @@ protoc --go_out=. --go_opt=paths=source_relative     --go-grpc_out=. --go-grpc_o
 
 go run server/main.go
 
-3. Run Client
+3. Run Client to test
 
-go run client/main.go
+go run client/main.go --addr localhost:50051 --filename main.c --command "gcc -o main main.c" --content "$(printf '#include <stdio.h>\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}')"
+
