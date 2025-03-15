@@ -46,17 +46,25 @@ func (wp *WorkerPool) GetNextWorker() string {
 	return worker
 }
 
-func SendToWorker(workerAddr string, workRequest *pb.WorkRequest) (*pb.WorkResponce, error) {
+func SendToWorker(workerAddr string, workRequest *pb.WorkRequest, wg *sync.WaitGroup, responses chan<- *pb.WorkResponce, errors chan<- error) {
+	defer wg.Done()
+
 	conn, err := grpc.Dial(workerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Printf("Failed to connect to worker %s: %v", workerAddr, err)
-		return nil, err
+		errors <- err
+		return
 	}
 	defer conn.Close()
 	client := pb.NewServerWorkerClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	return client.HelloWorker(ctx, workRequest)
+	resp, err := client.HelloWorker(ctx, workRequest)
+	if err != nil {
+		errors <- err
+		return
+	}
+	responses <- resp
 }
 
 func (s *server) HelloServer(_ context.Context, in *pb.BuildRequest) (*pb.BuildResponse, error) {
@@ -71,15 +79,26 @@ func (s *server) HelloServer(_ context.Context, in *pb.BuildRequest) (*pb.BuildR
 	workerAddr := s.workerPool.GetNextWorker()
 	log.Printf("Assigning work to worker at: %s", workerAddr)
 
-	resp, err := SendToWorker(workerAddr, workRequest)
-	if err != nil {
+	var wg sync.WaitGroup
+	responses := make(chan *pb.WorkResponce, 1)
+	errors := make(chan error, 1)
+
+	wg.Add(1)
+	go SendToWorker(workerAddr, workRequest, &wg, responses, errors)
+
+	wg.Wait()
+	close(responses)
+	close(errors)
+
+	select {
+	case resp := <-responses:
+		log.Printf("Response from worker: %s", resp.GetMessage())
+		outputFilename := in.GetFilename() + ".out"
+		return &pb.BuildResponse{Filename: outputFilename}, nil
+	case err := <-errors:
 		log.Printf("Error communicating with worker %s: %v", workerAddr, err)
 		return &pb.BuildResponse{Filename: "error_calling_worker"}, err
 	}
-
-	log.Printf("Response from worker: %s", resp.GetMessage())
-	outputFilename := in.GetFilename() + ".out"
-	return &pb.BuildResponse{Filename: outputFilename}, nil
 }
 
 func main() {
